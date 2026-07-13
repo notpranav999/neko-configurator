@@ -56,7 +56,11 @@
   .hero-frame{border-radius:var(--r-lg);overflow:hidden;position:relative;background:var(--cream-deep);}
   .hero-frame::before{content:"";display:block;padding-top:52%;}
   @media(max-width:700px){.hero-frame::before{padding-top:120%;}}
-  .hero-frame img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .hero-frame img,.hero-frame video{
+    position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+    will-change:transform;transform-origin:center 30%;
+  }
+  .hero-cap,.hero-side{will-change:transform,opacity;}
   .hero-cap{
     position:absolute;left:22px;bottom:20px;z-index:2;color:var(--white);
     font-family:'Baloo 2',sans-serif;font-weight:800;font-size:clamp(22px,3.4vw,38px);
@@ -200,7 +204,10 @@
 <!-- ================= HERO ================= -->
 <section class="hero">
   <div class="hero-frame rv">
-    <img src="img/hero.png" alt="NEKO iced coffee raised against the sky">
+    <video autoplay muted loop playsinline poster="img/hero.png" aria-label="NEKO iced coffee raised against the sky">
+      <source src="img/hero.mp4" type="video/mp4">
+      <img src="img/hero.png" alt="NEKO iced coffee raised against the sky">
+    </video>
     <div class="hero-cap"><small>Cold Brew Energy</small>Purr. Sip. Repeat.</div>
     <div class="hero-side">Cold coffee<br>made softly</div>
   </div>
@@ -333,6 +340,32 @@ document.getElementById("hoursTable").innerHTML = HOURS.map((h,i)=>`
     <span class="h-day">${h[0]}<span class="h-today">Today</span></span>
     <span>${h[1]}</span>
   </div>`).join("");
+
+/* ---------- hero scroll parallax ---------- */
+(function(){
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const frame = document.querySelector('.hero-frame');
+  if(!frame) return;
+  const media = frame.querySelector('video, img');
+  const cap = frame.querySelector('.hero-cap');
+  const side = frame.querySelector('.hero-side');
+  let ticking = false;
+  function update(){
+    ticking = false;
+    const r = frame.getBoundingClientRect();
+    const h = r.height || 1;
+    // p: 0 when hero top hits viewport top area, grows as you scroll past
+    const p = Math.min(Math.max(-r.top / h, 0), 1);
+    // video: zoom in up to 18% and drift down slightly for depth
+    media.style.transform = `scale(${1 + p * 0.18}) translateY(${p * 6}%)`;
+    // caption: slides down slower than the scroll + fades out
+    if(cap){ cap.style.transform = `translateY(${p * 90}px)`; cap.style.opacity = 1 - p * 1.4; }
+    if(side){ side.style.transform = `translateY(${p * 60}px)`; side.style.opacity = 1 - p * 1.6; }
+  }
+  window.addEventListener('scroll', ()=>{ if(!ticking){ ticking = true; requestAnimationFrame(update); } }, {passive:true});
+  window.addEventListener('resize', update);
+  update();
+})();
 
 /* ---------- reveal on scroll ---------- */
 const io = new IntersectionObserver(es=>es.forEach(e=>{
