@@ -51,14 +51,15 @@
     .top-right{display:none;}
   }
 
-  /* ============ HERO ============ */
-  .hero{padding:6px clamp(14px,3vw,44px) 0;}
-  .hero-frame{border-radius:var(--r-lg);overflow:hidden;position:relative;background:var(--cream-deep);}
-  .hero-frame::before{content:"";display:block;padding-top:52%;}
-  @media(max-width:700px){.hero-frame::before{padding-top:120%;}}
+  /* ============ HERO (scroll-scrub) ============ */
+  .hero-scrub{height:300vh;position:relative;}
+  .hero-sticky{position:sticky;top:0;height:100vh;height:100dvh;
+    padding:8px clamp(14px,3vw,44px);display:flex;align-items:center;}
+  .hero-frame{border-radius:var(--r-lg);overflow:hidden;position:relative;
+    background:var(--cream-deep);width:100%;height:calc(100% - 8px);}
   .hero-frame img,.hero-frame video{
     position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-    will-change:transform;transform-origin:center 30%;
+    will-change:transform;transform-origin:center center;
   }
   .hero-cap,.hero-side{will-change:transform,opacity;}
   .hero-cap{
@@ -202,14 +203,16 @@
 <div class="scroll-cue">Scroll ↓</div>
 
 <!-- ================= HERO ================= -->
-<section class="hero">
-  <div class="hero-frame rv">
-    <video autoplay muted loop playsinline poster="img/hero.png" aria-label="NEKO iced coffee raised against the sky">
-      <source src="img/hero.mp4" type="video/mp4">
-      <img src="img/hero.png" alt="NEKO iced coffee raised against the sky">
-    </video>
-    <div class="hero-cap"><small>Cold Brew Energy</small>Purr. Sip. Repeat.</div>
-    <div class="hero-side">Cold coffee<br>made softly</div>
+<section class="hero-scrub" id="heroScrub">
+  <div class="hero-sticky">
+    <div class="hero-frame">
+      <video id="heroVid" muted playsinline preload="auto" poster="img/hero.png" aria-label="NEKO iced coffee raised against the sky">
+        <source src="img/hero.mp4" type="video/mp4">
+        <img src="img/hero.png" alt="NEKO iced coffee raised against the sky">
+      </video>
+      <div class="hero-cap"><small>Cold Brew Energy</small>Purr. Sip. Repeat.</div>
+      <div class="hero-side">Cold coffee<br>made softly</div>
+    </div>
   </div>
 </section>
 
@@ -341,30 +344,75 @@ document.getElementById("hoursTable").innerHTML = HOURS.map((h,i)=>`
     <span>${h[1]}</span>
   </div>`).join("");
 
-/* ---------- hero scroll parallax ---------- */
+/* ---------- hero scroll-scrub: scroll drives video playback + zoom ---------- */
 (function(){
-  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const frame = document.querySelector('.hero-frame');
-  if(!frame) return;
-  const media = frame.querySelector('video, img');
-  const cap = frame.querySelector('.hero-cap');
-  const side = frame.querySelector('.hero-side');
-  let ticking = false;
-  function update(){
-    ticking = false;
-    const r = frame.getBoundingClientRect();
-    const h = r.height || 1;
-    // p: 0 when hero top hits viewport top area, grows as you scroll past
-    const p = Math.min(Math.max(-r.top / h, 0), 1);
-    // video: zoom in up to 18% and drift down slightly for depth
-    media.style.transform = `scale(${1 + p * 0.18}) translateY(${p * 6}%)`;
-    // caption: slides down slower than the scroll + fades out
-    if(cap){ cap.style.transform = `translateY(${p * 90}px)`; cap.style.opacity = 1 - p * 1.4; }
-    if(side){ side.style.transform = `translateY(${p * 60}px)`; side.style.opacity = 1 - p * 1.6; }
+  const wrap  = document.getElementById('heroScrub');
+  const vid   = document.getElementById('heroVid');
+  if(!wrap || !vid) return;
+  const frame = wrap.querySelector('.hero-frame');
+  const cap   = wrap.querySelector('.hero-cap');
+  const side  = wrap.querySelector('.hero-side');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // fallback: reduced motion, or video can't seek -> simple autoplay loop
+  function fallbackLoop(){
+    vid.loop = true; vid.autoplay = true;
+    vid.play().catch(()=>{});
   }
-  window.addEventListener('scroll', ()=>{ if(!ticking){ ticking = true; requestAnimationFrame(update); } }, {passive:true});
-  window.addEventListener('resize', update);
-  update();
+  if(reduced){ fallbackLoop(); return; }
+
+  // iOS/Android: a muted play->pause "kick" forces the buffer so seeking works
+  let kicked = false;
+  function kick(){
+    if(kicked) return; kicked = true;
+    vid.play().then(()=>vid.pause()).catch(()=>{});
+  }
+  ['touchstart','scroll','click'].forEach(ev =>
+    window.addEventListener(ev, kick, {once:true, passive:true}));
+
+  let target = 0, current = 0, raf = null;
+
+  function progress(){
+    const r = wrap.getBoundingClientRect();
+    const total = r.height - window.innerHeight;
+    return Math.min(Math.max(-r.top / (total || 1), 0), 1);
+  }
+
+  function frameLoop(){
+    // smooth the scrub so it feels fluid even between scroll events
+    current += (target - current) * 0.14;
+    if(Math.abs(target - current) < 0.0005) current = target;
+
+    // drive video time
+    if(vid.duration && isFinite(vid.duration)){
+      if(!vid.paused) vid.pause();
+      const t = current * (vid.duration - 0.05);
+      if(Math.abs(vid.currentTime - t) > 0.02) vid.currentTime = t;
+    }
+
+    // zoom while scrubbing (1.0 -> 1.25)
+    const media = vid.videoWidth ? vid : frame.querySelector('img');
+    if(media) media.style.transform = `scale(${1 + current * 0.25})`;
+
+    // captions fade out over the last third
+    const fade = Math.min(Math.max((current - 0.66) / 0.34, 0), 1);
+    if(cap){ cap.style.opacity = 1 - fade; cap.style.transform = `translateY(${fade*40}px)`; }
+    if(side){ side.style.opacity = 1 - fade; }
+
+    raf = (Math.abs(target - current) > 0.0005) ? requestAnimationFrame(frameLoop) : null;
+  }
+
+  function onScroll(){
+    target = progress();
+    if(raf === null) raf = requestAnimationFrame(frameLoop);
+  }
+  window.addEventListener('scroll', onScroll, {passive:true});
+  window.addEventListener('resize', onScroll);
+
+  // if metadata never arrives (broken file), gracefully autoplay-loop instead
+  setTimeout(()=>{ if(!vid.duration) fallbackLoop(); }, 4000);
+  vid.addEventListener('loadedmetadata', onScroll);
+  onScroll();
 })();
 
 /* ---------- reveal on scroll ---------- */
